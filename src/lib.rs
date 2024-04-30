@@ -2,15 +2,114 @@
 extern crate libc;
 
 // Importing necessary components from the `ndarray` crate to work with n-dimensional arrays.
-use ndarray::{Array, ArrayBase, Dimension, Ix1, Ix2, OwnedRepr, ViewRepr};
-use std::ffi::c_float;
 use libc::size_t;
+use ndarray::{Array, ArrayBase, Dim, Dimension, Ix1, Ix2, IxDynImpl, OwnedRepr, ShapeBuilder, ViewRepr};
+use std::ffi::c_float;
+
+#[repr(C)]
+struct MatParameter {
+    data: *mut c_float,
+    size: size_t,
+}
+
+// Extern block defining functions implemented in foreign code (e.g. C/C++ using CUDA).
+extern "C" {
+    fn matmul_cublas(
+        out: *mut c_float,
+        a: *const c_float,
+        b: *const c_float,
+        m: size_t,
+        n: size_t,
+        k: size_t,
+    );
+    fn _init_cublas();
+    fn _destory_cublas();
+    fn to_host(out: *mut f32, m: *const MatParameter);
+    fn to_device(inp: *const f32, size: usize)->*mut f32;
+    fn cuda_free(m: *mut c_float);
+    fn mat_free(m: *mut MatParameter);
+    fn matmul_cublas_device(
+        a: *const c_float,
+        b: *const c_float,
+        m: size_t,
+        n: size_t,
+        k: size_t,
+    ) -> *mut MatParameter;
+}
+
+pub struct CudaMat {
+    data: *mut c_float,
+    shape: Vec<usize>,
+}
+
+impl Drop for CudaMat {
+    fn drop(&mut self) {
+        unsafe {
+            cuda_free(self.data);
+        }
+    }
+}
+
+impl CudaMat {
+    pub fn dot(&self, mat: &CudaMat) -> CudaMat {
+        let (m, n, k) = if self.shape.len() == 1 || mat.shape.len() == 1 {
+            let dim = if mat.shape.len() == 1 {
+                mat.shape.get(0).unwrap()
+            } else {
+                self.shape.get(0).unwrap()
+            };
+            (1_usize, 1_usize, *dim)
+        } else {
+            // Otherwise, return the respective dimensions for the matrix multiplication.
+            (
+                *self.shape.get(0).unwrap(),
+                *mat.shape.get(1).unwrap(),
+                *self.shape.get(1).unwrap(),
+            )
+        };
+       
+        unsafe {
+            let mat_p = Some(matmul_cublas_device(self.data, mat.data, m, n, k));
+            let result = CudaMat {
+                data: (*(mat_p.unwrap())).data,
+                shape: if m == 1 { vec![1_usize] } else { vec![m, n] },
+            };
+            
+            mat_free(mat_p.unwrap());
+        
+            result
+        }
+
+
+    }
+
+    pub fn to_host(&self) -> ArrayBase<OwnedRepr<f32>, Dim<IxDynImpl>>
+    {
+        let shape = <Vec<usize> as Clone>::clone(&self.shape).into_shape();
+        let mut out = ndarray::Array::zeros(shape);
+        let mat_p = MatParameter {
+            data: self.data,
+            size: if self.shape.len() == 1 {
+                *self.shape.get(0).unwrap()
+            } else {
+                *self.shape.get(0).unwrap() * *self.shape.get(1).unwrap()
+            },
+        };
+
+        unsafe {
+            to_host(out.as_mut_ptr(),&mat_p);
+        }
+        out
+    }
+}
+
 
 // A trait that defines a CUDA-based dot product between arrays.
 pub trait CudaDot<Rhs> {
     type Output;
     // The method signature for performing the dot product using CUDA.
     fn cuda_dot(&self, rhs: &Rhs) -> Self::Output;
+
 }
 
 // Implementation of CudaDot for 1D owned representation arrays.
@@ -23,6 +122,8 @@ impl CudaDot<ArrayBase<OwnedRepr<f32>, Ix1>> for ArrayBase<OwnedRepr<f32>, Ix1> 
         matmul(&mut out, &self.view(), &rhs.t());
         return out;
     }
+    
+
 }
 
 // Implementation of CudaDot for multiplying a 1D array with a 2D array.
@@ -61,20 +162,37 @@ impl CudaDot<ArrayBase<OwnedRepr<f32>, Ix2>> for ArrayBase<OwnedRepr<f32>, Ix2> 
         return out;
     }
 }
-
-// Extern block defining functions implemented in foreign code (e.g. C/C++ using CUDA).
-extern "C" {
-    fn matmul_cublas(
-        out: *mut c_float,
-        a: *const c_float,
-        b: *const c_float,
-        m: size_t,
-        n: size_t,
-        k: size_t,
-    );
-    fn _init_cublas();
-    fn _destory_cublas();
+pub trait DeviceDot {
+    // The method return a CudaMat hold a pointer of memory in GPU
+    fn to_device(&self) -> CudaMat;
 }
+
+impl DeviceDot for ArrayBase<OwnedRepr<f32>, Ix1> {
+    fn to_device(&self) -> CudaMat {
+        let size = self.shape()[0];
+        unsafe {
+            let out = to_device(self.as_ptr(), size);
+            CudaMat {
+                data: out,
+                shape: vec![size],
+            }
+        }
+    }
+}
+
+impl DeviceDot for ArrayBase<OwnedRepr<f32>, Ix2> {
+    fn to_device(&self) -> CudaMat {
+        let size = self.shape()[0]*self.shape()[1];
+        unsafe {
+            let out = to_device(self.as_ptr(), size);
+            CudaMat {
+                data: out,
+                shape: vec![self.shape()[0],self.shape()[1]],
+            }
+        }
+    }
+}
+
 
 // Wrapper function to initialize CUDA for matrix operations.
 pub fn init_cublas() {
@@ -127,7 +245,6 @@ fn get_shape<D2: Dimension, D3: Dimension>(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,8 +252,8 @@ mod tests {
     use ndarray::array;
     use ndarray::Array;
     use std::time::Instant;
-    const H_SIZE: usize = 2048;
-    const V_SIZE: usize = 1000;
+    const H_SIZE: usize = 128;
+    const V_SIZE: usize = 1028;
 
     fn dot_with_ndarry() {
         let a = Array::from_elem((H_SIZE, H_SIZE), 1.0_f32);
@@ -156,6 +273,53 @@ mod tests {
             let _ = a.cuda_dot(&b);
         }
         println!("matmul elapsed: {:.2?}", start.elapsed());
+    }
+
+    fn dot_with_device() {
+        let a = Array::from_elem((H_SIZE, H_SIZE), 1.0_f32);
+        let b = Array::from_elem((H_SIZE, V_SIZE), 1.0_f32);
+        let start = Instant::now();
+        let a_mat = a.to_device();
+        let b_mat = b.to_device();
+        for _ in 0..100 {
+            let _ = a_mat.dot(&b_mat).to_host();
+        }
+        println!("device matmul elapsed: {:.2?}", start.elapsed());
+    }
+
+    #[test]
+    fn ix1_dot_ix1_device() {
+        let a = array![1.0_f32, 2.0_f32, 3.0_f32];
+        let b = array![1.0_f32, 3.0_f32, 5.0_f32];
+        init_cublas();
+        let out = a.to_device().dot(&b.to_device()).to_host();
+        destory_cublas();
+        assert!(out[0] == 22.0f32);
+    }
+
+    #[test]
+    fn ix1_dot_ix2_device() {
+        let a = array![1.0_f32, 2.0_f32, 3.0_f32];
+        let b = array![[1.0_f32], [3.0_f32], [5.0_f32]];
+        init_cublas();
+        let out = a.to_device().dot(&b.to_device()).to_host();
+        destory_cublas();
+        assert!(out[0] == 22.0f32);
+    }
+    #[test]
+    fn ix2_dot_ix2_device() {
+        let a = array![[1.0_f32, 2.0_f32, 3.0_f32], [4.0_f32, 5.0_f32, 6.0_f32]];
+        let b = array![[1.0_f32, 2.0_f32], [3.0_f32, 4.0_f32], [5.0_f32, 6.0_f32]];
+        let c = array![[1.0f32,1.0f32],[1.0f32,1.0f32]];
+        init_cublas();
+        let out = a.to_device().dot(&b.to_device()).dot(&c.to_device()).to_host();
+        destory_cublas();
+        assert!(
+            *out.get([0, 0]).unwrap() == 71.0f32
+                && *out.get([0, 1]).unwrap() == 92.0f32
+                && *out.get([1, 0]).unwrap() == 71.0f32
+                && *out.get([1, 1]).unwrap() == 92.0f32
+        );
     }
     #[test]
     fn ix1_dot_ix1() {
@@ -183,16 +347,19 @@ mod tests {
         let a = array![[1.0_f32, 2.0_f32, 3.0_f32], [4.0_f32, 5.0_f32, 6.0_f32]];
         let b = array![[1.0_f32, 2.0_f32], [3.0_f32, 4.0_f32], [5.0_f32, 6.0_f32]];
         let out = a.cuda_dot(&b);
-        assert!(*out.get((0,0)).unwrap() == 22.0f32 && 
-                *out.get((0,1)).unwrap() == 49.0f32  &&
-                *out.get((1,0)).unwrap() == 28.0f32  &&
-                *out.get((1,1)).unwrap() == 64.0f32 );
+        assert!(
+            *out.get((0, 0)).unwrap() == 22.0f32
+                && *out.get((0, 1)).unwrap() == 49.0f32
+                && *out.get((1, 0)).unwrap() == 28.0f32
+                && *out.get((1, 1)).unwrap() == 64.0f32
+        );
     }
 
     #[test]
     fn performance() {
         init_cublas();
         dot_with_cuda();
+        dot_with_device();
         destory_cublas();
         dot_with_ndarry();
     }

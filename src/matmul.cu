@@ -42,6 +42,51 @@ extern "C" void _destory_cublas()
     }
 }
 
+extern "C" struct Mat
+{
+    float * data;
+    size_t size;
+};
+
+typedef struct Mat Mat;
+
+extern "C" void to_host(float *out , Mat *m) {
+    cudaCheck(cudaMemcpy(out, m->data, m->size * sizeof(float), cudaMemcpyDeviceToHost));
+}
+
+extern "C" float * to_device(float *in, size_t size) {
+    float *out;
+    cudaCheck(cudaMalloc(&out, size * sizeof(float)));  // Allocate GPU memory
+    cudaCheck(cudaMemcpy(out, in, size * sizeof(float), cudaMemcpyHostToDevice));  // Corrected size
+
+    return out;
+}
+
+extern "C" void cuda_free(float *m) {
+    if(m) cudaCheck(cudaFree(m));
+}
+
+extern "C" void mat_free(Mat * m) {
+    if(m) {
+        delete m;
+    }
+}
+
+extern "C" Mat * matmul_cublas_device(const float *a, const float *b,
+                              int m, int n, int k)
+{
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    float * out_mat;
+    cudaCheck(cudaMalloc(&out_mat, m * n * sizeof(float)));
+    cublasCheck(cublasSgemm(cublas_handle, CUBLAS_OP_T, CUBLAS_OP_T, m, n, k, &alpha, a, k, b, n, &beta, out_mat, m));
+    
+    Mat * mat = new Mat();
+    mat->data = out_mat;
+    mat->size = m * n * sizeof(float);
+    return mat;
+}
+
 extern "C" void matmul_cublas(float *out,
                               const float *a, const float *b,
                               int m, int n, int k)

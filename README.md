@@ -51,6 +51,17 @@ let result = a.cuda_dot(&b);
 ```
 Here m, n, and k represent the dimensions of the matrices, and vec![...] should be replaced with your actual data.
 
+Using the method of first copying the matrix into GPU memory, here's a code example
+
+```Rust
+let a = array![[1.0_f32, 2.0_f32, 3.0_f32], [4.0_f32, 5.0_f32, 6.0_f32]];
+let b = array![[1.0_f32, 2.0_f32], [3.0_f32, 4.0_f32], [5.0_f32, 6.0_f32]];
+let c = array![[1.0f32,1.0f32],[1.0f32,1.0f32]];
+init_cublas();
+let out = a.to_device().dot(&b.to_device()).dot(&c.to_device()).to_host();
+destory_cublas();
+```
+
 ## Safety and Error Handling
 
 This library uses unsafe code to interface with CUDA functions. It includes error handling that checks the status of each CUDA and cuBLAS call, ensuring that any errors are handled gracefully and reported appropriately.
