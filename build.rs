@@ -8,5 +8,5 @@ fn main() {
     println!("cargo:rustc-link-lib=cudart");
     println!("cargo:rustc-link-lib=cublas");
     println!("cargo:rustc-link-lib=stdc++");
-    println!("cargo:rustc-link-lib=cblas");
+    println!("cargo:rustc-link-lib=cblas");   
 }

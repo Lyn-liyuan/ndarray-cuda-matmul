@@ -61,6 +61,32 @@ init_cublas();
 let out = a.to_device().dot(&b.to_device()).dot(&c.to_device()).to_host();
 destory_cublas();
 ```
+Matrix-scalar multiplication code example:
+
+```Rust
+    init_cublas();
+    let out = a
+        .to_device()
+        .dot(&b.to_device())
+        .dot(&c.to_device())
+        .mul_scalar(2.0_f32)
+        .to_host();
+    destory_cublas();
+```
+
+Matrix inversion code example:
+
+```Rust
+    let a = array![[1.0_f32, 2.0_f32, 3.0_f32, 4.0_f32],
+                   [2.0_f32, 3.0_f32, 1.0_f32, 2.0_f32],
+                   [1.0_f32, 1.0_f32, 1.0_f32, -1.0_f32],
+                   [1.0_f32, 0.0_f32, -2.0_f32, -6.0_f32],
+                ];
+        
+    init_cublas();
+    let out = a.to_device().inv().to_host();
+    destory_cublas();
+```
 
 ## Safety and Error Handling
 
