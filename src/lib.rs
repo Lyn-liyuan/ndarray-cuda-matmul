@@ -3,9 +3,7 @@ extern crate libc;
 
 // Importing necessary components from the `ndarray` crate to work with n-dimensional arrays.
 use libc::size_t;
-use ndarray::{
-    Array, ArrayBase, Dim, Dimension, Ix1, Ix2, IxDynImpl, OwnedRepr, ShapeBuilder, ViewRepr,
-};
+use ndarray::{Array, ArrayBase, Dimension, Ix1, Ix2, OwnedRepr, ViewRepr};
 use std::ffi::c_float;
 
 #[repr(C)]
@@ -39,15 +37,35 @@ extern "C" {
     ) -> *mut MatParameter;
 
     fn scalar_mul_device(a: *const c_float, scalar: c_float, size: size_t) -> *mut MatParameter;
-    fn inv_device(a: *const c_float,n: size_t) -> *mut MatParameter;
+    fn inv_device(a: *const c_float, n: size_t) -> *mut MatParameter;
 }
 
-pub struct CudaMat {
+pub struct Cubals {}
+
+impl Cubals {
+    pub fn new()->Self {
+        unsafe {
+           _init_cublas();
+        }
+        Cubals{}
+    }
+}
+
+impl Drop for Cubals {
+    fn drop(&mut self) {
+       unsafe {
+          _destory_cublas();
+       }
+    }
+}
+
+
+pub struct CudaMat<D: Dimension> {
     data: *mut c_float,
-    shape: Vec<usize>,
+    dim: D,
 }
 
-impl Drop for CudaMat {
+impl<D: Dimension> Drop for CudaMat<D> {
     fn drop(&mut self) {
         unsafe {
             cuda_free(self.data);
@@ -55,89 +73,21 @@ impl Drop for CudaMat {
     }
 }
 
-impl CudaMat {
-    pub fn dot(&self, mat: &CudaMat) -> CudaMat {
-        let (m, n, k) = if self.shape.len() == 1 || mat.shape.len() == 1 {
-            let dim = if mat.shape.len() == 1 {
-                mat.shape.get(0).unwrap()
-            } else {
-                self.shape.get(0).unwrap()
-            };
-            (1_usize, 1_usize, *dim)
-        } else {
-            // Otherwise, return the respective dimensions for the matrix multiplication.
-            (
-                *self.shape.get(0).unwrap(),
-                *mat.shape.get(1).unwrap(),
-                *self.shape.get(1).unwrap(),
-            )
-        };
-
-        unsafe {
-            let mat_p = Some(matmul_cublas_device(self.data, mat.data, m, n, k));
-            let result = CudaMat {
-                data: (*(mat_p.unwrap())).data,
-                shape: if m == 1 { vec![1_usize] } else { vec![m, n] },
-            };
-
-            mat_free(mat_p.unwrap());
-
-            result
-        }
+impl<D: Dimension> CudaMat<D> {
+    pub fn shape(&self) -> &[usize] {
+        self.dim.slice()
     }
-
-    pub fn mul_scalar(&self, scalar: f32) -> CudaMat {
-        let dim = self.shape.len();
-        let size = if dim == 1 {
-            *self.shape.get(0).unwrap()
-        } else {
-            self.shape.get(0).unwrap() * self.shape.get(1).unwrap()
-        };
+    pub fn mul_scalar(&self, scalar: f32) -> CudaMat<D> {
+        let size = self.dim.size();
         unsafe {
             let mat_p = scalar_mul_device(self.data, scalar, size);
             let result = CudaMat {
                 data: (*mat_p).data,
-                shape: if dim == 1 {
-                    vec![1_usize]
-                } else {
-                    vec![*self.shape.get(0).unwrap(), *self.shape.get(1).unwrap()]
-                },
+                dim: self.dim.clone(),
             };
             mat_free(mat_p);
             result
         }
-    }
-
-    pub fn inv(&self) -> CudaMat {
-        let n = *self.shape.get(0).unwrap();
-        unsafe {
-            let mat_p = inv_device(self.data, n);
-            let result = CudaMat {
-                data: (*mat_p).data,
-                shape: vec![*self.shape.get(0).unwrap(), *self.shape.get(1).unwrap()]
-            
-            };
-            mat_free(mat_p);
-            result
-        }
-    }
-
-    pub fn to_host(&self) -> ArrayBase<OwnedRepr<f32>, Dim<IxDynImpl>> {
-        let shape = <Vec<usize> as Clone>::clone(&self.shape).into_shape();
-        let mut out = ndarray::Array::zeros(shape);
-        let mat_p = MatParameter {
-            data: self.data,
-            size: if self.shape.len() == 1 {
-                *self.shape.get(0).unwrap()
-            } else {
-                *self.shape.get(0).unwrap() * *self.shape.get(1).unwrap()
-            },
-        };
-
-        unsafe {
-            to_host(out.as_mut_ptr(), &mat_p);
-        }
-        out
     }
 }
 
@@ -146,6 +96,120 @@ pub trait CudaDot<Rhs> {
     type Output;
     // The method signature for performing the dot product using CUDA.
     fn cuda_dot(&self, rhs: &Rhs) -> Self::Output;
+}
+
+pub trait MatDot<Rhs> {
+    type Output;
+    // The method signature for performing the dot product using CUDA.
+    fn dot(&self, mat: &Rhs) -> Self::Output;
+}
+
+pub trait MatInv<Rhs> {
+    // The method signature for performing the dot product using CUDA.
+    fn inv(&self) -> Rhs;
+}
+
+impl MatInv<CudaMat<Ix2>> for CudaMat<Ix2> {
+    fn inv(&self) -> CudaMat<Ix2> {
+        let shape = self.shape();
+        if shape[0] != shape[1] {
+            panic!("The matrix is ​​not a square matrix and cannot be inverted");
+        }
+        let n = shape[0];
+        unsafe {
+            let mat_p = inv_device(self.data, n);
+            let result = CudaMat {
+                data: (*mat_p).data,
+                dim: Ix2(shape[0], shape[1]),
+            };
+            mat_free(mat_p);
+            result
+        }
+    }
+}
+
+impl MatDot<CudaMat<Ix1>> for CudaMat<Ix1> {
+    type Output = CudaMat<Ix1>;
+    fn dot(&self, mat: &CudaMat<Ix1>) -> Self::Output {
+        let shape = self.shape();
+        let mat_shape = mat.shape();
+        if shape[0] != mat_shape[0] {
+            panic!("The rows of matrix A are not equal to the columns of matrix B and cannot be multiplied.");
+        }
+        let (m, n, k) = (1_usize, 1_usize, shape[0]);
+        unsafe {
+            let mat_p = Some(matmul_cublas_device(self.data, mat.data, m, n, k));
+            let result = CudaMat {
+                data: (*(mat_p.unwrap())).data,
+                dim: Ix1(1_usize),
+            };
+            mat_free(mat_p.unwrap());
+            result
+        }
+    }
+}
+
+impl MatDot<CudaMat<Ix2>> for CudaMat<Ix1> {
+    type Output = CudaMat<Ix1>;
+    fn dot(&self, mat: &CudaMat<Ix2>) -> Self::Output {
+        let shape = self.shape();
+        let mat_shape = mat.shape();
+        if shape[0] != mat_shape[0] {
+            panic!("The rows of matrix A are not equal to the columns of matrix B and cannot be multiplied.");
+        }
+        let (m, n, k) = (1_usize, 1_usize, shape[0]);
+        unsafe {
+            let mat_p = Some(matmul_cublas_device(self.data, mat.data, m, n, k));
+            let result = CudaMat {
+                data: (*(mat_p.unwrap())).data,
+                dim: Ix1(1_usize),
+            };
+            mat_free(mat_p.unwrap());
+            result
+        }
+    }
+}
+
+impl MatDot<CudaMat<Ix1>> for CudaMat<Ix2> {
+    type Output = CudaMat<Ix1>;
+    fn dot(&self, mat: &CudaMat<Ix1>) -> Self::Output {
+        let shape = self.shape();
+        let mat_shape = mat.shape();
+        if shape[0] != mat_shape[0] {
+            panic!("The rows of matrix A are not equal to the columns of matrix B and cannot be multiplied.");
+        }
+        let (m, n, k) = (1_usize, 1_usize, mat_shape[0]);
+        unsafe {
+            let mat_p = Some(matmul_cublas_device(self.data, mat.data, m, n, k));
+            let result = CudaMat {
+                data: (*(mat_p.unwrap())).data,
+                dim: Ix1(1_usize),
+            };
+            mat_free(mat_p.unwrap());
+            result
+        }
+    }
+}
+
+impl MatDot<CudaMat<Ix2>> for CudaMat<Ix2> {
+    type Output = CudaMat<Ix2>;
+    fn dot(&self, mat: &CudaMat<Ix2>) -> Self::Output {
+        let shape = self.shape();
+        let mat_shape = mat.shape();
+        if mat_shape[0] != shape[1] {
+            panic!("The rows of matrix A are not equal to the columns of matrix B and cannot be multiplied.");
+        }
+        let (m, n, k) = (shape[0], mat_shape[1], shape[1]);
+        unsafe {
+            let mat_p = Some(matmul_cublas_device(self.data, mat.data, m, n, k));
+            let result = CudaMat {
+                data: (*(mat_p.unwrap())).data,
+                dim: Ix2(m, n),
+            };
+            mat_free(mat_p.unwrap());
+            result
+        }
+    }
 }
 
 // Implementation of CudaDot for 1D owned representation arrays.
@@ -196,34 +260,75 @@ impl CudaDot<ArrayBase<OwnedRepr<f32>, Ix2>> for ArrayBase<OwnedRepr<f32>, Ix2> 
         return out;
     }
 }
-pub trait DeviceDot {
+pub trait ToDevice<D>
+where
+    D: Dimension,
+{
     // The method return a CudaMat hold a pointer of memory in GPU
-    fn to_device(&self) -> CudaMat;
+    fn to_device(&self) -> CudaMat<D>;
 }
 
-impl DeviceDot for ArrayBase<OwnedRepr<f32>, Ix1> {
-    fn to_device(&self) -> CudaMat {
+impl ToDevice<Ix1> for ArrayBase<OwnedRepr<f32>, Ix1> {
+    fn to_device(&self) -> CudaMat<Ix1> {
         let size = self.shape()[0];
         unsafe {
             let out = to_device(self.as_ptr(), size);
             CudaMat {
                 data: out,
-                shape: vec![size],
+                dim: Ix1(size),
             }
         }
     }
 }
 
-impl DeviceDot for ArrayBase<OwnedRepr<f32>, Ix2> {
-    fn to_device(&self) -> CudaMat {
+impl ToDevice<Ix2> for ArrayBase<OwnedRepr<f32>, Ix2> {
+    fn to_device(&self) -> CudaMat<Ix2> {
         let size = self.shape()[0] * self.shape()[1];
         unsafe {
             let out = to_device(self.as_ptr(), size);
             CudaMat {
                 data: out,
-                shape: vec![self.shape()[0], self.shape()[1]],
+                dim: Ix2(self.shape()[0], self.shape()[1]),
             }
         }
+    }
+}
+
+pub trait ToHost<D>
+where
+    D: Dimension,
+{
+    // The method return a CudaMat hold a pointer of memory in GPU
+    fn to_host(&self) -> ArrayBase<OwnedRepr<f32>, D>;
+}
+
+impl ToHost<Ix1> for CudaMat<Ix1> {
+    fn to_host(&self) -> ArrayBase<OwnedRepr<f32>, Ix1> {
+        let shape = self.shape();
+        let mut out = ndarray::Array::from_elem(shape[0], 0.0_f32);
+        let mat_p = MatParameter {
+            data: self.data,
+            size: shape[0],
+        };
+        unsafe {
+            to_host(out.as_mut_ptr(), &mat_p);
+        }
+        out
+    }
+}
+
+impl ToHost<Ix2> for CudaMat<Ix2> {
+    fn to_host(&self) -> ArrayBase<OwnedRepr<f32>, Ix2> {
+        let shape = self.shape();
+        let mut out = ndarray::Array::from_elem((shape[0], shape[1]), 0.0_f32);
+        let mat_p = MatParameter {
+            data: self.data,
+            size: self.dim.size(),
+        };
+        unsafe {
+            to_host(out.as_mut_ptr(), &mat_p);
+        }
+        out
     }
 }
 
@@ -266,16 +371,45 @@ fn get_shape<D2: Dimension, D3: Dimension>(
     let b_shape = b.shape();
     // Handling for the case where either input is a 1D array.
     if a.ndim() == 1 || b.ndim() == 1 {
-        let dim = if b.ndim() == 1 {
+        if b_shape[0] != a_shape[0] {
+            panic!("The rows of matrix A are not equal to the columns of matrix B and cannot be multiplied.");
+        }
+        let size = if b.ndim() == 1 {
             b_shape[0]
         } else {
             a_shape[0]
         };
-        (1, 1, dim)
+
+        (1, 1, size)
     } else {
+        if a_shape[1] != b_shape[0] {
+            panic!("The rows of matrix A are not equal to the columns of matrix B and cannot be multiplied.");
+        }
         // Otherwise, return the respective dimensions for the matrix multiplication.
         (a_shape[0], b_shape[1], a_shape[1])
     }
+}
+
+#[macro_export]
+macro_rules! gpu {
+    ($mat1:ident$(.dot($mat2:ident))*)=>{
+      {
+        Cubals::new();  
+        $mat1.to_device()$(.dot(&$mat2.to_device()))*
+      }
+    };
+    ($inv:ident.inv())=>{
+      {
+        Cubals::new();
+        $inv.to_device().inv()
+      }
+    };
+    ($smul:ident.mul_scalar($scalar:ident))=>{
+      {
+        Cubals::new();
+        $smul.to_device().mul_scalar($scalar)
+      }
+    };
 }
 
 #[cfg(test)]
@@ -358,22 +492,42 @@ mod tests {
                 && *out.get([1, 0]).unwrap() == 142.0f32
                 && *out.get([1, 1]).unwrap() == 184.0f32
         );
-
     }
 
     #[test]
     fn ix2_inv_device() {
-        let a = array![[1.0_f32, 2.0_f32, 3.0_f32, 4.0_f32],
-                       [2.0_f32, 3.0_f32, 1.0_f32, 2.0_f32],
-                       [1.0_f32, 1.0_f32, 1.0_f32, -1.0_f32],
-                       [1.0_f32, 0.0_f32, -2.0_f32, -6.0_f32],
-                       ];
-        
+        let a = array![
+            [1.0_f32, 2.0_f32, 3.0_f32, 4.0_f32],
+            [2.0_f32, 3.0_f32, 1.0_f32, 2.0_f32],
+            [1.0_f32, 1.0_f32, 1.0_f32, -1.0_f32],
+            [1.0_f32, 0.0_f32, -2.0_f32, -6.0_f32],
+        ];
+
         init_cublas();
         let out = a.to_device().inv().to_host();
-        
+
         destory_cublas();
-        println!("1:{:?}",out);
+        println!("1:{:?}", out);
+    }
+    #[test]
+    fn ix2_inv_macro() {
+        let a = array![
+            [1.0_f32, 2.0_f32, 3.0_f32, 4.0_f32],
+            [2.0_f32, 3.0_f32, 1.0_f32, 2.0_f32],
+            [1.0_f32, 1.0_f32, 1.0_f32, -1.0_f32],
+            [1.0_f32, 0.0_f32, -2.0_f32, -6.0_f32],
+        ];
+        let b = 1.0_f32;
+
+        let out = gpu!(a.mul_scalar(b));
+
+        let out = out.inv();
+        
+        let _  = gpu!(a.inv());
+
+        let out = out.to_host();
+       
+        println!("1:{:?}", out);
     }
     #[test]
     fn ix1_dot_ix1() {
@@ -381,6 +535,24 @@ mod tests {
         let b = array![1.0_f32, 3.0_f32, 5.0_f32];
         let out = a.cuda_dot(&b);
         assert!(out[0] == 22.0f32);
+    }
+    #[test]
+    fn ix1_dot_ix1_macro() {
+        let a = array![1.0_f32, 2.0_f32, 3.0_f32];
+        let b = array![1.0_f32, 3.0_f32, 5.0_f32];
+        let c = array![1.0_f32];
+        let out: CudaMat<Ix1> = gpu!{
+            a.dot(b).dot(c)
+        };
+        let out = out.to_host();
+        assert!(out[0] == 22.0f32);
+    }
+    #[test]
+    #[should_panic]
+    fn ix1_dot_ix1_unmatch() {
+        let a = array![1.0_f32, 2.0_f32, 3.0_f32];
+        let b = array![1.0_f32, 3.0_f32];
+        let _ = a.cuda_dot(&b);
     }
     #[test]
     fn ix1_dot_ix2() {
