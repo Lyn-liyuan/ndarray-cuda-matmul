@@ -303,7 +303,33 @@ impl ToDevice<Ix1> for ArrayBase<OwnedRepr<f32>, Ix1> {
     }
 }
 
+impl ToDevice<Ix1> for &ArrayBase<OwnedRepr<f32>, Ix1> {
+    fn to_device(&self) -> CudaMat<Ix1> {
+        let size = self.shape()[0];
+        unsafe {
+            let out = to_device(self.as_ptr(), size);
+            CudaMat {
+                data: out,
+                dim: Ix1(size),
+            }
+        }
+    }
+}
+
 impl ToDevice<Ix2> for ArrayBase<OwnedRepr<f32>, Ix2> {
+    fn to_device(&self) -> CudaMat<Ix2> {
+        let size = self.shape()[0] * self.shape()[1];
+        unsafe {
+            let out = to_device(self.as_ptr(), size);
+            CudaMat {
+                data: out,
+                dim: Ix2(self.shape()[0], self.shape()[1]),
+            }
+        }
+    }
+}
+
+impl ToDevice<Ix2> for &ArrayBase<OwnedRepr<f32>, Ix2> {
     fn to_device(&self) -> CudaMat<Ix2> {
         let size = self.shape()[0] * self.shape()[1];
         unsafe {
@@ -521,10 +547,15 @@ mod tests {
     #[test]
     fn test_run() {
         let a = array![1.0_f32, 2.0_f32, 3.0_f32];
-        run!{a => {
-             a.mul_scalar(0.1_f32)
-        }};
+        do_run(&a);
     }
+
+    fn do_run(a:&ArrayBase<OwnedRepr<f32>, Ix1>) {
+        run!{a => {
+            a.mul_scalar(0.1_f32)
+       }};
+    }
+
     #[test]
     fn ix2_dot_ix2_run() {
         let a = array![[1.0_f32, 2.0_f32, 3.0_f32], [4.0_f32, 5.0_f32, 6.0_f32]];
@@ -535,12 +566,11 @@ mod tests {
             a.dot(b).dot(c).mul_scalar(2.0_f32)
         })
         .to_host();
-
         assert!(
-            *out.get([0, 0]).unwrap() == 142.0f32
-                && *out.get([0, 1]).unwrap() == 184.0f32
-                && *out.get([1, 0]).unwrap() == 142.0f32
-                && *out.get([1, 1]).unwrap() == 184.0f32
+            *out.get([0, 0]).unwrap() == 100f32
+                && *out.get([0, 1]).unwrap() == 100f32
+                && *out.get([1, 0]).unwrap() == 226f32
+                && *out.get([1, 1]).unwrap() == 226f32
         );
     }
 
@@ -608,10 +638,10 @@ mod tests {
             .to_host();
         destory_cublas();
         assert!(
-            *out.get([0, 0]).unwrap() == 142.0f32
-                && *out.get([0, 1]).unwrap() == 184.0f32
-                && *out.get([1, 0]).unwrap() == 142.0f32
-                && *out.get([1, 1]).unwrap() == 184.0f32
+            *out.get([0, 0]).unwrap() == 100f32
+                && *out.get([0, 1]).unwrap() == 100f32
+                && *out.get([1, 0]).unwrap() == 226f32
+                && *out.get([1, 1]).unwrap() == 226f32
         );
     }
 
