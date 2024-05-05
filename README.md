@@ -101,10 +101,10 @@ fn least_squares_method()
     println!("{:?}",bate_hat);
 }
 ```
-The example code implements the least squares method using the code that is most similar to the data formula.
-$$
- (X^TX)^{-1}X^Ty
-$$
+The example code implements the least squares method using the code that is most similar to the mathematical expression.
+
+$$(X^TX)^{-1}X^Ty$$
+
 V.S.
 ```Rust
 x_t.dot(x).inv().dot(&x_t).dot(y)
