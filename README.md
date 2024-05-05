@@ -77,15 +77,37 @@ Matrix-scalar multiplication code example:
 Matrix inversion code example:
 
 ```Rust
-    let a = array![[1.0_f32, 2.0_f32, 3.0_f32, 4.0_f32],
-                   [2.0_f32, 3.0_f32, 1.0_f32, 2.0_f32],
-                   [1.0_f32, 1.0_f32, 1.0_f32, -1.0_f32],
-                   [1.0_f32, 0.0_f32, -2.0_f32, -6.0_f32],
-                ];
-        
-    init_cublas();
-    let out = a.to_device().inv().to_host();
-    destory_cublas();
+let a = array![[1.0_f32, 2.0_f32, 3.0_f32, 4.0_f32],
+                [2.0_f32, 3.0_f32, 1.0_f32, 2.0_f32],
+                [1.0_f32, 1.0_f32, 1.0_f32, -1.0_f32],
+                [1.0_f32, 0.0_f32, -2.0_f32, -6.0_f32],
+            ];
+    
+init_cublas();
+let out = a.to_device().inv().to_host();
+destory_cublas();
+```
+Using run macro can simplify the code and write it like a mathematical expression. The following is an example of using run macro.
+
+```Rust
+fn least_squares_method()
+{
+    let x = array![[1f32, 1f32], [1f32, 2f32], [1f32, 3f32], [1f32, 4f32]];
+    let y = array![[6f32], [5f32], [7f32], [10f32]];
+    let bate_hat = run!(x,y => {
+        let x_t = x.t();
+        x_t.dot(x).inv().dot(&x_t).dot(y)
+    }).to_host();
+    println!("{:?}",bate_hat);
+}
+```
+The example code implements the least squares method using the code that is most similar to the data formula.
+$$
+ (X^TX)^{-1}X^Ty
+$$
+V.S.
+```Rust
+x_t.dot(x).inv().dot(&x_t).dot(y)
 ```
 
 ## Safety and Error Handling

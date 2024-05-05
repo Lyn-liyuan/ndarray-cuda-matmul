@@ -80,6 +80,22 @@ extern "C" void mat_free(Mat *m)
     }
 }
 
+
+
+extern "C" Mat *t_cublas_device(const float *a, int m, int n)
+{
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    float *out_mat;
+    cudaCheck(cudaMalloc(&out_mat, m * n * sizeof(float)));
+    cublasCheck(cublasSgeam(cublas_handle, CUBLAS_OP_T, CUBLAS_OP_T, m, n, &alpha, a, n, &beta, a, n, out_mat, m));
+    cudaCheck(cudaGetLastError());
+    Mat *mat = new Mat();
+    mat->data = out_mat;
+    mat->size = m * n;
+    return mat;
+}
+
 extern "C" Mat *matmul_cublas_device(const float *a, const float *b,
                                      int m, int n, int k)
 {
@@ -89,10 +105,10 @@ extern "C" Mat *matmul_cublas_device(const float *a, const float *b,
     cudaCheck(cudaMalloc(&out_mat, m * n * sizeof(float)));
     cublasCheck(cublasSgemm(cublas_handle, CUBLAS_OP_T, CUBLAS_OP_T, m, n, k, &alpha, a, k, b, n, &beta, out_mat, m));
     cudaCheck(cudaGetLastError());
-    Mat *mat = new Mat();
-    mat->data = out_mat;
-    mat->size = m * n;
-    return mat;
+    auto out_mat_t = t_cublas_device(out_mat,n,m);
+    cudaCheck(cudaFree(out_mat));
+    
+    return out_mat_t;
 }
 
 extern "C" void matmul_cublas(float *out,
