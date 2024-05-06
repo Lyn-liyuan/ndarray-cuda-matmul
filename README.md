@@ -4,7 +4,7 @@ Welcome to the Ndarray CUDA Matrix Multiplication library, a high-performance co
 
 ## Features
 - Seamless integration with Rust's ndarray crate.
-- High-performance matrix multiplication utilizing CUDA.
+- High-performance matrix operations utilizing CUDA.
 - Support for one-dimensional and two-dimensional arrays.
 - Automatic memory management between host and device.
 - Simple and intuitive API mirroring that of ndarray.
@@ -12,10 +12,9 @@ Welcome to the Ndarray CUDA Matrix Multiplication library, a high-performance co
 ## Prerequisites
 
 To use this library, you will need:
-- g++ (Ubuntu 9.4.0-1ubuntu1~20.04.2) 9.4.0
-- rustc 1.77.2 (25ef9e3d8 2024-04-09)
-- cuda_12.1
-- Nvidia Driver Version: 535.154.05
+- g++ 7 or above
+- rustc 1.77.2
+- cuda 10 or above
 
 ## Usage
 
