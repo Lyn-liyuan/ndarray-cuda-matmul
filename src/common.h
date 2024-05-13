@@ -13,7 +13,7 @@ __host__ __device__ T ceil_div(T dividend, T divisor) {
 // checking utils
 
 // CUDA error checking
-void cuda_check(cudaError_t error, const char *file, int line) {
+inline void cuda_check(cudaError_t error, const char *file, int line) {
     if (error != cudaSuccess) {
         printf("[CUDA ERROR] at file %s:%d:\n%s\n", file, line,
                cudaGetErrorString(error));
@@ -23,7 +23,7 @@ void cuda_check(cudaError_t error, const char *file, int line) {
 #define cudaCheck(err) (cuda_check(err, __FILE__, __LINE__))
 
 // cuBLAS error checking
-void cublasCheck(cublasStatus_t status, const char *file, int line)
+inline void cublasCheck(cublasStatus_t status, const char *file, int line)
 {
     if (status != CUBLAS_STATUS_SUCCESS) {
         printf("[cuBLAS ERROR]: %d %s %d\n", status, file, line);
@@ -31,6 +31,16 @@ void cublasCheck(cublasStatus_t status, const char *file, int line)
     }
 }
 #define cublasCheck(status) { cublasCheck((status), __FILE__, __LINE__); }
+
+// cuSolver error checking
+inline void cuSolverCheck(cusolverStatus_t status, const char *file, int line)
+{
+    if (status != CUSOLVER_STATUS_SUCCESS) {
+        printf("[cuSolver ERROR]: %d %s %d\n", status, file, line);
+        exit(EXIT_FAILURE);
+    }
+}
+#define cusolverCheck(status) { cuSolverCheck((status), __FILE__, __LINE__); }
 
 // ----------------------------------------------------------------------------
 // random utils

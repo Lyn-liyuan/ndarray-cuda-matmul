@@ -1,6 +1,6 @@
-# Ndarray CUDA Matrix Multiplication
+# Ndarray CUDA Matrix Operations
 
-Welcome to the Ndarray CUDA Matrix Multiplication library, a high-performance computing solution designed to accelerate matrix operations using Nvidia's CUDA technology with Rust's ndarray data structure. This library leverages the powerful cuBLAS library to perform efficient matrix multiplications on compatible Nvidia GPUs.
+Welcome to the Ndarray CUDA Matrix Operations library, a high-performance computing solution designed to accelerate matrix operations using Nvidia's CUDA technology with Rust's ndarray data structure. This library leverages the powerful cuBLAS library to perform efficient matrix multiplications on compatible Nvidia GPUs.
 
 ## Features
 - Seamless integration with Rust's ndarray crate.

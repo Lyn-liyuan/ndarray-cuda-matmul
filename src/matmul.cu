@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cublas_v2.h>
+#include <cusolverDn.h>
 #include <cuda_runtime.h>
 #include "common.h"
 #include <mutex>
@@ -187,3 +188,4 @@ extern "C" Mat *inv_device(float *mat, int n)
     out_mat->size = n * n;
     return out_mat;
 }
+
