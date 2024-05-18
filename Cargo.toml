@@ -1,4 +1,4 @@
-workspace = { members = ["examples/PCA"] }
+
 [package]
 name = "ndarray-cuda-matmul"
 version = "0.1.0"
